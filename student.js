@@ -1,46 +1,37 @@
 'use strict';
 
+const socket = io();
+
 const studentId = 'student_' + Math.random().toString(16).substr(2, 8);
 document.getElementById('studentIdDisplay').innerText = `Student ID: ${studentId}`;
 
-const brokerAddress = `ws://${window.location.hostname}:${window.location.port}`;
-const client = mqtt.connect(brokerAddress, { clientId: studentId });
-
-client.on('connect', () => {
-    console.log(`[STUDENT] SUCCESS: Connected to MQTT broker.`);
-});
-
-client.on('error', (err) => {
-    console.error(`[STUDENT] ERROR: Connection error: `, err);
+socket.on('connect', () => {
+    console.log(`[STUDENT] SUCCESS: Connected to server with socket ID ${socket.id}`);
+    socket.emit('student_join', { studentId: studentId });
 });
 
 const canvas = document.getElementById('drawingCanvas');
 const context = canvas.getContext('2d');
 let isDrawing = false;
 
-// --- 유틸리티 함수: 마우스와 터치 이벤트의 좌표를 동일한 형식으로 변환 ---
+// 마우스와 터치 이벤트의 좌표를 동일한 형식으로 변환
 function getEventPosition(canvas, event) {
     const rect = canvas.getBoundingClientRect();
-    // 터치 이벤트인지 확인
     if (event.touches && event.touches.length > 0) {
         return {
             x: event.touches[0].clientX - rect.left,
             y: event.touches[0].clientY - rect.top
         };
     }
-    // 마우스 이벤트
     return { 
         x: event.clientX - rect.left, 
         y: event.clientY - rect.top 
     };
 }
 
-// --- 그림 그리기 로직 함수 (마우스와 터치 공용) ---
+// 그림 그리기 로직 (마우스와 터치 공용)
 function startDrawing(e) {
-    // 터치 이벤트의 기본 스크롤 동작을 막음 (중요!)
-    e.preventDefault(); 
-    if (!client.connected) return;
-
+    e.preventDefault();
     isDrawing = true;
     const pos = getEventPosition(canvas, e);
     context.beginPath();
@@ -53,10 +44,11 @@ function stopDrawing(e) {
     isDrawing = false;
 }
 
+
+
 function draw(e) {
     e.preventDefault();
-    if (!isDrawing || !client.connected) return;
-
+    if (!isDrawing) return;
     const pos = getEventPosition(canvas, e);
     context.lineWidth = 5;
     context.lineCap = 'round';
@@ -66,36 +58,25 @@ function draw(e) {
     publishDrawEvent(pos.x, pos.y, false);
 }
 
-// --- 이벤트 발행(Publish) 함수들 (변경 없음) ---
-function publishEvent(type, payload = {}) {
-    if (!client.connected) {
-        console.warn('[STUDENT] WARN: Not connected, cannot publish event.');
-        return;
-    }
-    const eventData = { studentId, type, payload };
-    client.publish('class/events', JSON.stringify(eventData), { qos: 0 });
-}
-
+// Socket.IO를 사용한 이벤트 전송
 function publishDrawEvent(x, y, isStart) {
-    publishEvent('draw', { x, y, isStart });
+    const eventData = { studentId: studentId, payload: { x, y, isStart } };
+    socket.emit('drawing_event', eventData);
 }
 
 function publishEraseEvent() {
     context.clearRect(0, 0, canvas.width, canvas.height);
-    console.log(`[STUDENT] ACTION: Publishing erase event.`);
-    publishEvent('erase');
+    console.log(`[STUDENT] ACTION: Emitting erase event.`);
+    const eventData = { studentId: studentId };
+    socket.emit('erase_event', eventData);
 }
 
-
-// --- HTML 요소에 이벤트 리스너 연결 (마우스와 터치 모두 추가!) ---
-
-// 마우스 이벤트 리스너
+// 마우스와 터치 이벤트 리스너 모두 등록
 canvas.addEventListener('mousedown', startDrawing);
 canvas.addEventListener('mouseup', stopDrawing);
 canvas.addEventListener('mouseout', stopDrawing);
 canvas.addEventListener('mousemove', draw);
 
-// 터치 이벤트 리스너
 canvas.addEventListener('touchstart', startDrawing);
 canvas.addEventListener('touchend', stopDrawing);
 canvas.addEventListener('touchcancel', stopDrawing);
